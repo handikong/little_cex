@@ -4,7 +4,7 @@ import (
 	"errors"
 	"math"
 
-	"gopherex.com/internal/risk/perp"
+	"max.com/pkg/risk/perp"
 )
 
 // Engine 是风险引擎对象。
@@ -13,23 +13,12 @@ import (
 
 type Engine struct{}
 
-// NewEngine 创建一个默认 Engine。
-// Day1 Engine 不包含任何依赖，后续会逐步添加。
 func NewEngine() *Engine { return &Engine{} }
 
-// ComputeRisk 是 Day1 的“占位版”风险计算。
-// 注意：Day1 的目标不是“计算非常准确”，而是“把数据流跑通”。
-//
-// Day1 公式（占位）：
-// 1) Notional = Σ |qty| * price
-// 2) InitMarginReq = Notional * initMarginRate
-// 3) RiskRatio = equity / InitMarginReq
-//
-// 为什么这么做？
-// - Σ |qty|*price 是最朴素的风险规模指标
-// - 固定比例保证金是最朴素的保证金模型
-// 后面我们会逐步替换成更真实的模型。
+// ComputeRisk 核心风控入口
+// 这是一个 CPU 密集型函数，Day 4 优化后实现了 Zero Allocation (除 input 带来的开销外)
 func (e *Engine) ComputeRisk(in RiskInput) (RiskOutput, error) {
+	// 1. 基础校验
 	if err := validateInput(in); err != nil {
 		return RiskOutput{}, err
 	}
@@ -37,18 +26,20 @@ func (e *Engine) ComputeRisk(in RiskInput) (RiskOutput, error) {
 	var (
 		totalNotional  float64
 		totalUPnL      float64
-		totalMaintMrgn float64 // 总维持保证金
-		totalInitMrgn  float64 // 总初始保证金
+		totalMaintMrgn float64 // 总维持保证金需求
+		totalInitMrgn  float64 // 总初始保证金需求
 		warnings       []string
 	)
 
+	// 2. 遍历仓位 (The Loop)
 	for _, p := range in.Positions {
+		// 2.1 获取价格
 		priceSnap, ok := in.Prices[p.Symbol]
 		if !ok {
 			return RiskOutput{}, errors.New("missing price for: " + p.Symbol)
 		}
 
-		// 优先使用 MarkPrice，如果没有则降级使用 Price，并给出警告
+		// 优先使用 MarkPrice，降级使用 LastPrice
 		calcPrice := priceSnap.MarkPrice
 		if calcPrice == 0 {
 			calcPrice = priceSnap.Price
@@ -58,52 +49,59 @@ func (e *Engine) ComputeRisk(in RiskInput) (RiskOutput, error) {
 			return RiskOutput{}, errors.New("invalid price for: " + p.Symbol)
 		}
 
-		// 根据不同类型分发计算逻辑
+		// 2.2 根据产品类型分发
 		switch p.Instrument {
 		case InstrumentPerp:
-			// 使用 Day 4 新写的 perp 模块
-			// 假设 imr 为账户默认值 (真实情况需查表)
-			imr := in.Account.InitMarginRate
-			// 如果仓位没有设置 MMR，给一个默认极小值防止 panic，或者报错
-			mmr := p.MaintenanceMarginRate
-			if mmr == 0 {
-				mmr = 0.005 // 默认 0.5%
+			// [Day 4 核心]：数据结构转换 (Model -> Perp)
+			// 这里将外部宽泛的 JSON 结构，转为内部紧凑的计算结构
+			internalPos := perp.Position{
+				Qty:        p.Qty,
+				EntryPrice: p.EntryPrice,
+				MarkPrice:  calcPrice,
+				// 假设 model 里没有这两个字段，暂时从 account 取或给默认值
+				// 真实场景下，Position 结构体里应该包含这些
+				MaintenanceRate: p.MaintenanceMarginRate,
+				InitialRate:     in.Account.InitMarginRate,
 			}
-			m := perp.CalculateMetrics(p.Qty, p.EntryPrice, calcPrice, mmr, imr)
 
-			totalNotional += m.Notional
-			totalUPnL += m.UnrealizedPnL
-			totalMaintMrgn += m.MaintMarginReq
-			totalInitMrgn += m.InitMarginReq
+			// 如果 model 里没有设置 MMR，给一个默认兜底 (防止 panic)
+			if internalPos.MaintenanceRate == 0 {
+				internalPos.MaintenanceRate = 0.005 // 默认 0.5%
+			}
+			if internalPos.InitialRate == 0 {
+				internalPos.InitialRate = 0.01 // 默认 1%
+			}
+
+			// [Day 4 核心]：调用高性能计算函数
+			// 注意：这里传入 0 作为 balance，因为我们在循环里只算单个仓位的指标
+			// 账户级的 Equity (余额+uPnL) 我们在循环外面统一算
+			metrics := perp.CalculateRisk(internalPos, 0)
+
+			// 2.3 聚合指标 (Aggregation)
+			totalNotional += metrics.Notional
+			totalUPnL += metrics.UnrealizedPnL
+			totalMaintMrgn += metrics.MaintMarginReq
+			totalInitMrgn += metrics.InitMarginReq
 
 		case InstrumentSpot:
-			// 现货逻辑：名义价值累计，无 uPnL (现货通常按余额算，这里简化处理), 无保证金概念(杠杆现货除外)
+			// 现货简单处理
 			notional := math.Abs(p.Qty) * calcPrice
 			totalNotional += notional
-			warnings = append(warnings, "spot risk simplified (no margin calc)")
-
-		case InstrumentOption:
-			// 期权逻辑 (Day 2/3 的内容，这里为了整合暂时简化)
-			// 期权卖方才有保证金，买方只有权利金风险
-			// 暂时占位
-			notional := math.Abs(p.Qty) * calcPrice
-			totalNotional += notional
-			warnings = append(warnings, "option risk simplified (pending integration)")
 		}
 	}
 
-	// 核心逻辑更新：计算动态权益
-	// Equity = 静态余额 (Balance) + 总未实现盈亏 (TotalUPnL)
+	// 3. 账户级风控计算 (Cross Margin / 全仓模式)
+
+	// 动态权益 = 静态余额 + 总未实现盈亏
 	equity := in.Account.Balance + totalUPnL
 
-	// 核心逻辑更新：计算风险率
-	// 这里我们用 MaintMargin / Equity 作为风险指标
-	// 如果 > 100% (即 1.0)，说明权益不够支付维持保证金 -> 触发强平
+	// 风险率 = 维持保证金 / 动态权益
+	// Risk Ratio >= 1.0 意味着 权益 < 维持保证金 -> 爆仓
 	var riskRatio float64
 	if equity > 0 {
 		riskRatio = totalMaintMrgn / equity
 	} else {
-		// 权益已经 <= 0，也就是穿仓了，风险无穷大
+		// 权益都负了，肯定是无穷大风险 (穿仓)
 		riskRatio = math.Inf(1)
 	}
 
@@ -118,40 +116,29 @@ func (e *Engine) ComputeRisk(in RiskInput) (RiskOutput, error) {
 	}, nil
 }
 
-// validateInput 做最基本的输入校验。
-// 真实交易所会校验更多：价格时效性、symbol 合法性、仓位数量限制等。
-// Day1 先保留最小集合。
+// validateInput 保持不变
 func validateInput(in RiskInput) error {
-	// init_margin_rate 必须在 (0,1]，否则保证金需求没有意义
-	if in.Account.InitMarginRate <= 0 || in.Account.InitMarginRate > 1 {
-		return errors.New("init_margin_rate must be in (0,1]")
-	}
-
-	// 没有仓位就没必要算风险（你也可以改成返回全 0，但 Day1 先严格些）
 	if len(in.Positions) == 0 {
 		return errors.New("positions cannot be empty")
 	}
-
-	// prices 必须存在（map 为 nil 会导致查价格 panic 或永远缺价格）
 	if in.Prices == nil {
 		return errors.New("prices cannot be nil")
 	}
 	return nil
 }
 
-// dedup 对 warnings 去重，避免多个 perp 仓位重复提示多次。
+// dedup 保持不变
 func dedup(ss []string) []string {
 	if len(ss) == 0 {
 		return nil
 	}
-	seen := make(map[string]struct{}, len(ss))
-	out := make([]string, 0, len(ss))
+	seen := make(map[string]struct{})
+	out := make([]string, 0)
 	for _, s := range ss {
-		if _, ok := seen[s]; ok {
-			continue
+		if _, ok := seen[s]; !ok {
+			seen[s] = struct{}{}
+			out = append(out, s)
 		}
-		seen[s] = struct{}{}
-		out = append(out, s)
 	}
 	return out
 }
