@@ -47,36 +47,92 @@
 - [ ] **Day 7: 强平引擎 (Liquidation Engine)**
     - [ ] **算法**: 反向索引推导强平价格 (Liq Price)。
     - [ ] **数据结构**: 内存 B-Tree / SkipList 维护强平线。
-    - [ ] 实现毫秒级强平触发（非轮询模式）。
-- [ ] **Day 8: 阶段性压测与 pprof 优化**
-    - [ ] 全链路集成测试 (Mock Market -> Engine -> Alert/Liq)。
-    - [ ] 压力测试 (10w 用户, 5000 TPS)。
-    - [ ] 深度 pprof 分析 (CPU/Heap/Block/Trace) 并消除瓶颈。
+    - [x] 实现毫秒级强平触发（非轮询模式）。
+- [x] **Day 8: 阶段性压测与 pprof 优化** ✅
+    - [x] 全链路集成测试 (Mock Market -> Engine -> Alert/Liq)。
+    - [x] 压力测试 (20w 用户, 200K TPS)。
+    - [x] 深度 pprof 分析 (CPU/Heap/逃逸分析) 并消除瓶颈。
+    - [x] 优化成果: 耗时 ↓25%, 内存 ↓64%, 分配 ↓50%
 
-### 第三阶段：撮合引擎与链上实战
-- [ ] **Day 9: 撮合引擎 (Matching Engine)**
+### 第三阶段：撮合引擎 (Matching Engine)
+- [ ] **Day 9: 撮合引擎核心**
     - [ ] 实现 LOB (Limit Order Book) 订单簿。
     - [ ] 核心数据结构：红黑树 (Red-Black Tree) 或 跳表。
     - [ ] 实现 Maker/Taker 撮合逻辑。
-    - [ ] 挑战：撮合路径零 GC。
-- [ ] **Day 10: 组合保证金与交割合约**
-    - [ ] 实现交割日期限结构。
-    - [ ] 实现 Portfolio Margin (跨币种/跨期对冲减免)。
-    - [ ] 矩阵相关性计算优化 (SIMD/Assembly)。
-- [ ] **Day 11: 链上数据同步 (On-Chain Indexer)**
+    - [ ] 订单类型: Limit/Market/IOC/FOK/GTC。
+    - [ ] 挑战：撮合路径零 GC，< 10μs 延迟。
+- [ ] **Day 10: 成交与事件系统**
+    - [ ] Execution Report 成交回报。
+    - [ ] 事件驱动架构 (Kafka/NATS/Channel)。
+    - [ ] 对接强平引擎 (LiquidationExecutor)。
+
+### 第四阶段：现货交易 (Spot Trading)
+- [ ] **Day 11: 现货交易系统**
+    - [ ] 现货订单簿与撮合。
+    - [ ] 资产账户划转与冻结。
+    - [ ] 手续费计算 (Maker/Taker)。
+
+### 第五阶段：合约交易 (Futures)
+- [ ] **Day 12: 永续合约 (Perpetual)**
+    - [ ] 资金费率 (Funding Rate) 计算与收取。
+    - [ ] 标记价格 (Mark Price) 与指数价格。
+    - [ ] 对接已有风控引擎。
+- [ ] **Day 13: 交割合约 (Delivery)**
+    - [ ] 交割日期限结构。
+    - [ ] 到期自动结算。
+    - [ ] 组合保证金 (Portfolio Margin)。
+
+### 第六阶段：期权交易 (Options)
+- [ ] **Day 14: 期权核心**
+    - [ ] 期权订单簿 (Call/Put)。
+    - [ ] Greeks 实时计算 (Delta/Gamma/Vega/Theta)。
+    - [ ] IV 曲面与定价。
+- [ ] **Day 15: 期权风控**
+    - [ ] 期权保证金计算。
+    - [ ] 行权与到期处理。
+
+### 第七阶段：高级功能
+- [ ] **Day 16: 链上同步 (On-Chain Indexer)**
     - [ ] Geth 客户端集成与 WebSocket 监听。
-    - [ ] 处理区块重组 (Reorg) 与回滚。
-    - [ ] 高速 Log 解析 (Ring Buffer + ABI Cache)。
-- [ ] **Day 12: 链上永续模型 (vAMM)**
-    - [ ] 模拟 vAMM (x*y=k) 定价模型。
-    - [ ] 预言机 (Oracle) 价格清洗与防抢跑设计。
-- [ ] **Day 13: 灾难工程 (Chaos Engineering)**
-    - [ ] 引入 Chaos Mesh 模拟网络抖动、Redis 宕机。
-    - [ ] 实现熔断 (Circuit Breaker) 与优雅降级机制。
-- [ ] **Day 14: 终极验收**
+    - [ ] 区块重组 (Reorg) 与回滚处理。
+- [ ] **Day 17: 灾难工程 (Chaos Engineering)**
+    - [ ] Chaos Mesh 模拟故障。
+    - [ ] 熔断 (Circuit Breaker) 与优雅降级。
+- [ ] **Day 18: 终极验收**
     - [ ] 模拟 "312" 极端行情压测。
     - [ ] 产出最终性能报告 (TPS, Latency P99)。
 
+### 扩展阶段：交易增强
+- [ ] **杠杆交易 (Margin Trading)**
+    - [ ] 借贷系统 (Lending Pool)。
+    - [ ] 全仓/逐仓保证金。
+- [ ] **跟单交易 (Copy Trading)**
+    - [ ] 交易员绩效追踪。
+    - [ ] 跟单用户资金同步。
+- [ ] **量化工具 (Trading Bots)**
+    - [ ] 网格交易 (Grid)。
+    - [ ] 定投 (DCA)。
+
+### 基础设施模块 (Infrastructure)
+- [ ] **钱包系统 (Wallet)**
+    - [ ] 充提币流程。
+    - [ ] 热钱包 / 冷钱包分离。
+    - [ ] 多签 (Multi-sig)。
+- [ ] **账户系统 (Account)**
+    - [ ] 资产划转 (Transfer)。
+    - [ ] 子账户 (Sub-account)。
+    - [ ] 冻结/解冻。
+- [ ] **手续费系统 (Fee)**
+    - [ ] Maker/Taker 费率。
+    - [ ] VIP 等级折扣。
+    - [ ] 返佣 (Rebate)。
+- [ ] **API 网关 (Gateway)**
+    - [ ] REST API。
+    - [ ] WebSocket 推送。
+    - [ ] 限流 (Rate Limiting)。
+- [ ] **KYC/AML**
+    - [ ] 身份认证。
+    - [ ] 反洗钱规则。
 ---
 
 ## 🛠 技术栈

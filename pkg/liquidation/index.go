@@ -97,6 +97,8 @@ func (m *CowMap) Get(userID int64) (UserRiskData, bool) {
 // 特性:
 //   - 完全无锁
 //   - 返回的是调用时的快照
+//
+// 注意: 此方法会复制所有数据，对于大量数据使用 ForEach 更高效
 func (m *CowMap) GetAll() []UserRiskData {
 	currentMap := m.data.Load()
 
@@ -106,6 +108,32 @@ func (m *CowMap) GetAll() []UserRiskData {
 		result = append(result, v)
 	}
 	return result
+}
+
+// GetAllReadOnly 返回底层 Map 的只读指针
+//
+// 优化: 零内存分配，直接返回指针
+//
+// 警告: 调用者不能修改返回的 Map！
+// 如果需要修改，请使用 GetAll() 获取副本
+func (m *CowMap) GetAllReadOnly() *map[int64]UserRiskData {
+	return m.data.Load()
+}
+
+// ForEach 遍历所有用户数据
+//
+// 优化: 零内存分配，适用于只需要遍历不需要返回切片的场景
+//
+// 用法:
+//
+//	m.ForEach(func(data UserRiskData) {
+//	    // 处理 data
+//	})
+func (m *CowMap) ForEach(fn func(UserRiskData)) {
+	currentMap := m.data.Load()
+	for _, v := range *currentMap {
+		fn(v)
+	}
 }
 
 // Len 获取 Map 的大小
@@ -275,12 +303,34 @@ func levelToIndex(level RiskLevel) int {
 }
 
 // GetByLevel 获取指定等级的所有用户
+// 注意: 会复制数据，对于只读访问使用 GetByLevelReadOnly
 func (idx *RiskLevelIndex) GetByLevel(level RiskLevel) []UserRiskData {
 	i := levelToIndex(level)
 	if i < 0 {
 		return nil
 	}
 	return idx.levels[i].GetAll()
+}
+
+// GetByLevelReadOnly 返回指定等级用户的只读 Map 指针
+// 优化: 零内存分配
+// 警告: 不要修改返回的 Map！
+func (idx *RiskLevelIndex) GetByLevelReadOnly(level RiskLevel) *map[int64]UserRiskData {
+	i := levelToIndex(level)
+	if i < 0 {
+		return nil
+	}
+	return idx.levels[i].GetAllReadOnly()
+}
+
+// ForEachByLevel 遍历指定等级的所有用户
+// 优化: 零内存分配
+func (idx *RiskLevelIndex) ForEachByLevel(level RiskLevel, fn func(UserRiskData)) {
+	i := levelToIndex(level)
+	if i < 0 {
+		return
+	}
+	idx.levels[i].ForEach(fn)
 }
 
 // GetUser 获取指定用户（从所有等级中查找）

@@ -226,15 +226,16 @@ func (e *Engine) runChecker(level RiskLevel, interval time.Duration) {
 func (e *Engine) checkLevel(level RiskLevel) {
 	ctx := context.Background()
 
-	// 获取该等级的所有用户
-	users := e.index.GetByLevel(level)
-	if len(users) == 0 {
+	// 获取该等级的所有用户（只读，零分配）
+	usersMap := e.index.GetByLevelReadOnly(level)
+	if usersMap == nil || len(*usersMap) == 0 {
 		return
 	}
 
-	log.Printf("[Checker] Checking level=%s, users=%d", level, len(users))
+	log.Printf("[Checker] Checking level=%s, users=%d", level, len(*usersMap))
 
-	for _, user := range users {
+	// 直接遍历 map，避免复制到切片
+	for _, user := range *usersMap {
 		// 重新获取用户数据
 		riskInput, err := e.userProvider.GetUserRiskInput(ctx, user.UserID)
 		if err != nil {

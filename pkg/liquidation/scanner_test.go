@@ -335,7 +335,7 @@ func TestScanner_ConvertToUserRiskData(t *testing.T) {
 		MaintMarginReq: 8500,
 	}
 
-	data := scanner.convertToUserRiskData(12345, input, output)
+	data := scanner.convertToUserRiskData(12345, input, output, time.Now().UnixNano())
 
 	if data.UserID != 12345 {
 		t.Errorf("UserID = %d, want 12345", data.UserID)
