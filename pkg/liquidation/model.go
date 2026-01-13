@@ -160,6 +160,8 @@ type LiquidationTask struct {
 	// UserID 要强平的用户
 	UserID int64
 
+	Symbol string
+
 	// RiskRatio 触发时的风险率
 	RiskRatio float64
 
